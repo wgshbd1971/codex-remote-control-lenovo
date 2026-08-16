@@ -1,0 +1,4 @@
+.lenovo-device
+retrieved-logs/
+__pycache__/
+*.pyc
