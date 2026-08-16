@@ -1,0 +1,58 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+CONFIG="$SCRIPT_DIR/.lenovo-device"
+
+usage() {
+  echo "Usage: $0 configure USER HOST | test | deploy | ports | capture PORT BAUD [SECONDS] | capture-live PORT BAUD [SECONDS] | status | stop | fetch"
+}
+
+if [[ ${1:-} == configure ]]; then
+  [[ $# -eq 3 ]] || { usage; exit 2; }
+  printf 'FIELD_USER=%q\nFIELD_HOST=%q\n' "$2" "$3" > "$CONFIG"
+  chmod 600 "$CONFIG"
+  echo "Saved $CONFIG"
+  exit 0
+fi
+
+[[ -f "$CONFIG" ]] || { echo "Run: $0 configure WINDOWS_USERNAME TAILSCALE_IP"; exit 2; }
+# shellcheck disable=SC1090
+source "$CONFIG"
+REMOTE="${FIELD_USER}@${FIELD_HOST}"
+PY='C:\CodexRemote\.venv\Scripts\python.exe'
+RUNNER='C:\CodexRemote\current\serial_recorder.py'
+
+case ${1:-} in
+  test)
+    ssh "$REMOTE" 'whoami && hostname'
+    ;;
+  deploy)
+    tar -C "$SCRIPT_DIR" -cf - serial_recorder.py requirements.txt | ssh "$REMOTE" 'tar -xf - -C C:\CodexRemote\current && C:\CodexRemote\.venv\Scripts\python.exe -m pip install -r C:\CodexRemote\current\requirements.txt'
+    ;;
+  ports)
+    ssh "$REMOTE" "$PY $RUNNER ports"
+    ;;
+  capture-live)
+    [[ $# -ge 3 ]] || { usage; exit 2; }
+    ssh "$REMOTE" "$PY $RUNNER capture --port $2 --baud $3 --seconds ${4:-60}"
+    ;;
+  capture)
+    [[ $# -ge 3 ]] || { usage; exit 2; }
+    job="capture-$(date +%Y%m%d-%H%M%S)"
+    ssh "$REMOTE" "powershell -NoProfile -Command \"\$p=Start-Process -FilePath '$PY' -ArgumentList '$RUNNER capture --port $2 --baud $3 --seconds ${4:-60}' -RedirectStandardOutput 'C:\CodexRemote\run\$job.out' -RedirectStandardError 'C:\CodexRemote\run\$job.err' -PassThru; \$p.Id | Set-Content 'C:\CodexRemote\run\capture.pid'; Write-Output \$p.Id\""
+    echo "Started $job on $REMOTE"
+    ;;
+  status)
+    ssh "$REMOTE" "powershell -NoProfile -Command \"if(Test-Path C:\CodexRemote\run\capture.pid){\$id=Get-Content C:\CodexRemote\run\capture.pid; Get-Process -Id \$id -ErrorAction SilentlyContinue}else{Write-Output 'No capture PID recorded'}\""
+    ;;
+  stop)
+    ssh "$REMOTE" "powershell -NoProfile -Command \"if(Test-Path C:\CodexRemote\run\capture.pid){\$id=Get-Content C:\CodexRemote\run\capture.pid; Stop-Process -Id \$id -ErrorAction SilentlyContinue; Remove-Item C:\CodexRemote\run\capture.pid -ErrorAction SilentlyContinue}\""
+    ;;
+  fetch)
+    mkdir -p "$SCRIPT_DIR/retrieved-logs"
+    scp "$REMOTE:C:/CodexRemote/logs/*" "$SCRIPT_DIR/retrieved-logs/" || true
+    echo "Logs are in $SCRIPT_DIR/retrieved-logs"
+    ;;
+  *) usage; exit 2 ;;
+esac
