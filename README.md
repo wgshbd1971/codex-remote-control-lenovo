@@ -1,114 +1,109 @@
 # Codex Remote Control Kit for Lenovo
 
-This kit makes the Lenovo ThinkPad W540 the **remote/field computer** and the MacBook the **development/control station**. It is a general remote-control and software-deployment kit; the serial recorder is its first tool, not the identity of the whole kit.
+A beginner-friendly bridge that lets Codex on a Mac run commands and transfer files on a Lenovo ThinkPad W540 over the local network.
 
 ```text
-MacBook / Codex  ------ SSH over LAN ------>  Lenovo W540 / Windows
-                                              |
-                                              +-- USB-RS232/RS485 adapter
-                                              +-- ECM-55
+Phone → ChatGPT Remote → Codex on Mac → SSH over local LAN → Lenovo W540
 ```
 
-The Lenovo can run deployed tools without an internet connection. Because both computers use the same Starlink local network, SSH is used directly and Tailscale is not required.
+This repository is only the remote-control layer. Device-specific tools belong in their own repositories and can be uploaded to the Lenovo later.
 
-## 1. One-time Lenovo setup
+## What it does
 
-1. On the Lenovo, open **PowerShell as Administrator**.
-2. Copy this folder to the Lenovo (a USB stick is fine for the first setup).
-3. In PowerShell, enter:
+- Enables Microsoft's OpenSSH Server on Windows 10.
+- Restricts SSH connections to devices on the Lenovo's local subnet.
+- Creates safe working folders under `C:\CodexRemote`.
+- Provides a Mac command named `lenovoctl` for connection tests, commands, uploads, and downloads.
+- Provides a read-only diagnostic tool.
 
-   ```powershell
-   Set-ExecutionPolicy -Scope Process Bypass
-   .\setup-lenovo.ps1
-   ```
+It does not install Codex on the Lenovo, open the Lenovo to the public internet, or include any hardware/sniffing software.
 
-4. Find the Lenovo's local IPv4 address with `ipconfig` and its Windows username with `$env:USERNAME`.
+## Install on the Lenovo
 
-The setup script enables Windows OpenSSH, installs Python if needed, creates `C:\CodexRemote`, and installs `pyserial` in a private virtual environment.
+Requirements: Windows 10 22H2, an administrator account, and internet access during initial setup.
 
-## 2. Set up the Mac
+1. Open the [latest release](https://github.com/wgshbd1971/codex-remote-control-lenovo/releases/latest).
+2. Under **Assets**, download `codex-remote-control-lenovo-v1.0.0.zip`.
+3. Right-click the ZIP and choose **Extract All**.
+4. Open the extracted folder.
+5. Right-click `INSTALL-LENOVO.cmd` and choose **Run as administrator**.
+6. Keep the final window open. It displays the Windows username and local IPv4 address needed by the Mac.
 
-Open Terminal in this folder:
+The installer writes the same information to:
+
+```text
+C:\CodexRemote\connection-info.txt
+```
+
+## Connect from the Mac
+
+Download or clone this repository on the Mac, open Terminal in its folder, and run:
 
 ```bash
 chmod +x lenovoctl
 ./lenovoctl configure WINDOWS_USERNAME 192.168.x.x
 ./lenovoctl test
+./lenovoctl info
 ```
 
-On the first connection, verify and accept the SSH host fingerprint. Windows will ask for the Windows account password. For password-free operation:
+Use the username and IPv4 address shown by the Lenovo installer. The first connection asks you to confirm the Lenovo's host key and then requests the Windows account password. A Windows Hello PIN is not an SSH password.
+
+## Everyday commands
+
+Run a harmless command:
 
 ```bash
-ssh-keygen -t ed25519
-ssh-copy-id WINDOWS_USERNAME@100.x.y.z
+./lenovoctl run hostname
 ```
 
-If `ssh-copy-id` is unavailable, see “SSH key setup” below.
-
-## 3. Deploy and use
+Upload a file or folder into the Lenovo inbox:
 
 ```bash
-./lenovoctl deploy
-./lenovoctl ports
-./lenovoctl capture COM3 9600 60
-./lenovoctl fetch
+./lenovoctl upload ./my-tool.zip
 ```
 
-- Replace `COM3` and `9600` with the real adapter port and ECM-55 baud rate.
-- `capture` is receive-only and writes timestamped binary and text/hex logs on the Lenovo.
-- `fetch` copies all logs into `retrieved-logs/` on the Mac.
-- A capture continues on the Lenovo if the SSH connection drops.
-
-Check and stop captures:
+Download a file or folder from the Lenovo outbox:
 
 ```bash
-./lenovoctl status
-./lenovoctl stop
+./lenovoctl download C:/CodexRemote/outbox/results.zip ./downloads/
 ```
 
-Run a job interactively while diagnosing something:
+Open an interactive Windows command prompt:
 
 ```bash
-./lenovoctl capture-live COM3 9600 30
+./lenovoctl shell
 ```
 
-## 4. Offline shed workflow
+## Lenovo folders
 
-Before leaving Wi-Fi:
+```text
+C:\CodexRemote\inbox    Files sent from the Mac
+C:\CodexRemote\outbox   Results waiting for the Mac
+C:\CodexRemote\scripts  Device-specific scripts deployed later
+C:\CodexRemote\logs     Tool and diagnostic logs
+```
+
+## Diagnostics
+
+On the Lenovo, double-click `DIAGNOSE-LENOVO.cmd`. It checks Windows, network, SSH, firewall, and the working folders without changing anything.
+
+From the Mac:
 
 ```bash
-./lenovoctl deploy
-./lenovoctl ports
+./lenovoctl diagnose
 ```
 
-At the Lenovo, open PowerShell and run:
+## Phone control
 
-```powershell
-C:\CodexRemote\.venv\Scripts\python.exe C:\CodexRemote\current\serial_recorder.py ports
-C:\CodexRemote\.venv\Scripts\python.exe C:\CodexRemote\current\serial_recorder.py capture --port COM3 --baud 9600 --seconds 120
-```
+Phone control is configured on the Mac, not the Lenovo. In the ChatGPT desktop app on the Mac, open **Settings → Connections → Control this Mac or PC**, set up Remote, and pair the ChatGPT mobile app. Keep the Mac awake and online.
 
-Later, reconnect both machines and run `./lenovoctl fetch` on the Mac.
+## Security
 
-## Safety and RS-485 notes
+- SSH is reachable only from the Lenovo's local subnet.
+- Do not configure port forwarding on the Starlink router.
+- Password authentication remains available for initial setup and recovery.
+- No passwords or private keys are stored in this repository.
+- Device-specific software should use its own repository and safety rules.
 
-- The included capture command never transmits; start by listening only.
-- Confirm voltage levels before connecting. RS-232 is not TTL serial and must not be wired directly to TTL pins.
-- For RS-485, connect A/B according to the adapter/device documentation; A/B naming is unfortunately not universal. Add signal ground where required.
-- Avoid adding termination or bias resistors until the existing bus topology is understood.
-- Start with a USB adapter that provides galvanic isolation when working near industrial equipment.
-- We still need the ECM-55 manual or known settings to add frame decoding: baud, data bits, parity, stop bits, RS-232 versus two/four-wire RS-485, and any request/response commands.
+See [SECURITY.md](SECURITY.md) for the trust model.
 
-## SSH key setup without `ssh-copy-id`
-
-On the Mac, display the public key:
-
-```bash
-cat ~/.ssh/id_ed25519.pub
-```
-
-On the Lenovo, create `%USERPROFILE%\.ssh\authorized_keys` and paste that one-line key into it. For an administrator account, Windows OpenSSH may instead use `C:\ProgramData\ssh\administrators_authorized_keys`; Windows ACLs must allow only Administrators and SYSTEM. Password login is acceptable for initial testing.
-
-## Configuration
-
-`lenovoctl configure` writes `.lenovo-device`, which is deliberately excluded by `.gitignore`. It contains the Lenovo SSH address and username, not a password. Keep private keys in the normal `~/.ssh` directory—never in this project.
