@@ -1,4 +1,3 @@
 .lenovo-device
-retrieved-logs/
-__pycache__/
-*.pyc
+downloads/
+.DS_Store
